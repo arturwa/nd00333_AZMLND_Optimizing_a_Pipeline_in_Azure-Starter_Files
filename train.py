@@ -55,13 +55,26 @@ def main():
     # Data is located at:
     # "https://automlsamplenotebookdata.blob.core.windows.net/automl-sample-notebook-data/bankmarketing_train.csv"
 
-    ds = ### YOUR CODE HERE ###
+    # azureml-core of version 1.0.72 or higher is required
+    # azureml-dataprep[pandas] of version 1.1.34 or higher is required
+    from azureml.core import Workspace, Dataset
+
+    subscription_id = 'f5091c60-1c3c-430f-8d81-d802f6bf2414'
+    resource_group = 'aml-quickstarts-227081'
+    workspace_name = 'quick-starts-ws-227081'
+
+    workspace = Workspace(subscription_id, resource_group, workspace_name)
+
+    ds = Dataset.get_by_name(workspace, name='bank-marketing')#
     
     x, y = clean_data(ds)
 
     # TODO: Split data into train and test sets.
 
-    ### YOUR CODE HERE ###a
+    from sklearn.model_selection import train_test_split
+
+    # Splitting the dataset into training and testing sets
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
 
     model = LogisticRegression(C=args.C, max_iter=args.max_iter).fit(x_train, y_train)
 
