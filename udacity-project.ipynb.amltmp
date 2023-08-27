@@ -1,0 +1,512 @@
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "source": [
+        "from azureml.core import Workspace, Experiment\n",
+        "\n",
+        "ws = Workspace.from_config()\n",
+        "exp = Experiment(workspace=ws, name=\"udacity-project\")\n",
+        "\n",
+        "print('Workspace name: ' + ws.name, \n",
+        "      'Azure region: ' + ws.location, \n",
+        "      'Subscription id: ' + ws.subscription_id, \n",
+        "      'Resource group: ' + ws.resource_group, sep = '\\n')\n",
+        "\n",
+        "run = exp.start_logging()"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Workspace name: quick-starts-ws-240741\nAzure region: westeurope\nSubscription id: d4ad7261-832d-46b2-b093-22156001df5b\nResource group: aml-quickstarts-240741\n"
+        }
+      ],
+      "execution_count": 3,
+      "metadata": {
+        "gather": {
+          "logged": 1693159391545
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azureml.core.compute import ComputeTarget, AmlCompute\n",
+        "\n",
+        "cluster_name = \"myCluster1\"\n",
+        "\n",
+        "# TODO: Create compute cluster\n",
+        "# Use vm_size = \"Standard_D2_V2\" in your provisioning configuration.\n",
+        "# max_nodes should be no greater than 4.\n",
+        "\n",
+        "compute_config = AmlCompute.provisioning_configuration(vm_size=\"STANDARD_D2_V2\", max_nodes=4)\n",
+        "\n",
+        "try:\n",
+        "    compute_target = ComputeTarget(workspace=ws, name=cluster_name)\n",
+        "    print(\"Found existing compute target.\")\n",
+        "except:\n",
+        "    compute_target = ComputeTarget.create(workspace=ws, name=cluster_name, provisioning_configuration=compute_config)\n",
+        "    compute_target.wait_for_completion(show_output=True)\n",
+        "\n"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "InProgress..\nSucceededProvisioning operation finished, operation \"Succeeded\"\nSucceeded\nAmlCompute wait for completion finished\n\nMinimum number of nodes requested have been provisioned\n"
+        }
+      ],
+      "execution_count": 4,
+      "metadata": {
+        "gather": {
+          "logged": 1693159412462
+        },
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azureml.widgets import RunDetails\n",
+        "from azureml.train.sklearn import SKLearn\n",
+        "from azureml.train.hyperdrive.run import PrimaryMetricGoal\n",
+        "from azureml.train.hyperdrive.policy import BanditPolicy\n",
+        "from azureml.train.hyperdrive.sampling import RandomParameterSampling\n",
+        "from azureml.train.hyperdrive.runconfig import HyperDriveConfig\n",
+        "from azureml.train.hyperdrive.parameter_expressions import choice, uniform\n",
+        "from azureml.core import Environment, ScriptRunConfig\n",
+        "import os\n",
+        "\n",
+        "# Specify parameter sampler\n",
+        "ps = RandomParameterSampling({'--C':uniform(0.1, 100), \n",
+        "                              '--max_iter': choice(100, 400, 500, 800)})\n",
+        "\n",
+        "# Specify a Policy\n",
+        "policy = BanditPolicy(2, slack_factor=0.1)\n",
+        "\n",
+        "if \"training\" not in os.listdir():\n",
+        "    os.mkdir(\"./training\")\n",
+        "\n",
+        "# Setup environment for your training run\n",
+        "sklearn_env = Environment.from_conda_specification(name='sklearn-env', file_path='conda_dependencies.yml')\n",
+        "\n",
+        "# Create a ScriptRunConfig Object to specify the configuration details of your training job\n",
+        "src = SKLearn('.',\n",
+        "                entry_script='train.py',\n",
+        "                compute_target=compute_target\n",
+        "                )\n",
+        "\n",
+        "# Create a HyperDriveConfig using the src object, hyperparameter sampler, and policy.\n",
+        "hyperdrive_config = HyperDriveConfig(estimator=src,\n",
+        "                                     hyperparameter_sampling=ps,\n",
+        "                                     policy=policy,\n",
+        "                                     primary_metric_name='Accuracy',\n",
+        "                                     primary_metric_goal=PrimaryMetricGoal.MAXIMIZE,\n",
+        "                                     max_total_runs=50,\n",
+        "                                    max_concurrent_runs=4)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "'SKLearn' estimator is deprecated. Please use 'ScriptRunConfig' from 'azureml.core.script_run_config' with your own defined environment or the AzureML-Tutorial curated environment.\n"
+        }
+      ],
+      "execution_count": 5,
+      "metadata": {
+        "gather": {
+          "logged": 1693159429896
+        },
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Submit your hyperdrive run to the experiment and show run details with the widget.\n",
+        "\n",
+        "hdr = exp.submit(config=hyperdrive_config)\n",
+        "RunDetails(hdr).show()\n",
+        "#hyperdrive_run.wait_for_completion(show_output=True)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "WARNING:root:If 'script' has been provided here and a script file name has been specified in 'run_config', 'script' provided in ScriptRunConfig initialization will take precedence.\n"
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "text/plain": "_HyperDriveWidget(widget_settings={'childWidgetDisplay': 'popup', 'send_telemetry': False, 'log_level': 'INFO'…",
+            "application/vnd.jupyter.widget-view+json": {
+              "version_major": 2,
+              "version_minor": 0,
+              "model_id": "8a6b2888dca844a884467cc5c5b0494b"
+            }
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "application/aml.mini.widget.v1": "{\"status\": \"Completed\", \"workbench_run_details_uri\": \"https://ml.azure.com/runs/HD_388102b6-984e-421e-a4c3-5b56e5b92e66?wsid=/subscriptions/d4ad7261-832d-46b2-b093-22156001df5b/resourcegroups/aml-quickstarts-240741/workspaces/quick-starts-ws-240741&tid=660b3398-b80e-49d2-bc5b-ac1dc93b5254\", \"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66\", \"run_properties\": {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66\", \"created_utc\": \"2023-08-27T18:03:57.335385Z\", \"properties\": {\"primary_metric_config\": \"{\\\"name\\\":\\\"Accuracy\\\",\\\"goal\\\":\\\"maximize\\\"}\", \"resume_from\": \"null\", \"runTemplate\": \"HyperDrive\", \"azureml.runsource\": \"hyperdrive\", \"platform\": \"AML\", \"ContentSnapshotId\": \"d96cc1f3-79ab-4dc1-8f27-79216c4ba361\", \"user_agent\": \"python/3.8.5 (Linux-5.15.0-1040-azure-x86_64-with-glibc2.10) msrest/0.7.1 Hyperdrive.Service/1.0.0 Hyperdrive.SDK/core.1.51.0\", \"space_size\": \"infinite_space_size\", \"score\": \"0.9166059723233795\", \"best_child_run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\", \"best_metric_status\": \"Succeeded\", \"best_data_container_id\": \"dcid.HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\"}, \"tags\": {\"_aml_system_max_concurrent_jobs\": \"4\", \"_aml_system_max_total_jobs\": \"50\", \"_aml_system_max_duration_minutes\": \"10080\", \"_aml_system_policy_config\": \"{\\\"name\\\":\\\"Bandit\\\",\\\"properties\\\":{\\\"evaluation_interval\\\":2,\\\"delay_evaluation\\\":0,\\\"slack_factor\\\":0.1}}\", \"_aml_system_generator_config\": \"{\\\"name\\\":\\\"RANDOM\\\",\\\"parameter_space\\\":{\\\"--C\\\":[\\\"uniform\\\",[0.1,100]],\\\"--max_iter\\\":[\\\"choice\\\",[[100,400,500,800]]]},\\\"properties\\\":null}\", \"_aml_system_primary_metric_config\": \"{\\\"name\\\":\\\"Accuracy\\\",\\\"goal\\\":\\\"maximize\\\"}\", \"_aml_system_platform_config\": \"{\\\"ServiceAddress\\\": \\\"https://westeurope.experiments.azureml.net\\\", \\\"SubscriptionId\\\": \\\"d4ad7261-832d-46b2-b093-22156001df5b\\\", \\\"ResourceGroupName\\\": \\\"aml-quickstarts-240741\\\", \\\"WorkspaceName\\\": \\\"quick-starts-ws-240741\\\", \\\"ExperimentName\\\": \\\"udacity-project\\\", \\\"Definition\\\": {\\\"Configuration\\\": null, \\\"Attribution\\\": null, \\\"TelemetryValues\\\": {\\\"amlClientType\\\": \\\"azureml-sdk-train\\\", \\\"amlClientModule\\\": \\\"[Scrubbed]\\\", \\\"amlClientFunction\\\": \\\"[Scrubbed]\\\", \\\"tenantId\\\": \\\"660b3398-b80e-49d2-bc5b-ac1dc93b5254\\\", \\\"amlClientRequestId\\\": \\\"72eb7ae6-2162-4b50-9873-c186509b4fbc\\\", \\\"amlClientSessionId\\\": \\\"e4965bdf-8865-4d09-b89d-70a666ec8019\\\", \\\"subscriptionId\\\": \\\"d4ad7261-832d-46b2-b093-22156001df5b\\\", \\\"estimator\\\": \\\"SKLearn\\\", \\\"samplingMethod\\\": \\\"RANDOM\\\", \\\"terminationPolicy\\\": \\\"Bandit\\\", \\\"primaryMetricGoal\\\": \\\"maximize\\\", \\\"maxTotalRuns\\\": 50, \\\"maxConcurrentRuns\\\": 4, \\\"maxDurationMinutes\\\": 10080, \\\"vmSize\\\": null}, \\\"Overrides\\\": {\\\"Script\\\": \\\"train.py\\\", \\\"Command\\\": \\\"\\\", \\\"UseAbsolutePath\\\": false, \\\"Arguments\\\": [], \\\"SourceDirectoryDataStore\\\": null, \\\"Framework\\\": 0, \\\"Communicator\\\": 0, \\\"Target\\\": \\\"myCluster1\\\", \\\"DataReferences\\\": {}, \\\"Data\\\": {}, \\\"OutputData\\\": {}, \\\"Datacaches\\\": [], \\\"JobName\\\": null, \\\"MaxRunDurationSeconds\\\": null, \\\"NodeCount\\\": 1, \\\"InstanceTypes\\\": [], \\\"Priority\\\": null, \\\"CredentialPassthrough\\\": false, \\\"Identity\\\": null, \\\"Environment\\\": {\\\"Name\\\": \\\"default-environment\\\", \\\"AutoRebuild\\\": true, \\\"Python\\\": {\\\"InterpreterPath\\\": \\\"python\\\", \\\"UserManagedDependencies\\\": true, \\\"CondaDependencies\\\": {\\\"name\\\": \\\"project_environment\\\", \\\"dependencies\\\": [\\\"python=3.8.13\\\", {\\\"pip\\\": [\\\"azureml-defaults\\\"]}], \\\"channels\\\": [\\\"anaconda\\\", \\\"conda-forge\\\"]}, \\\"BaseCondaEnvironment\\\": null}, \\\"EnvironmentVariables\\\": {\\\"EXAMPLE_ENV_VAR\\\": \\\"EXAMPLE_VALUE\\\"}, \\\"Docker\\\": {\\\"BaseImage\\\": \\\"sklearn:0.20.3-cpu\\\", \\\"Platform\\\": {\\\"Os\\\": \\\"Linux\\\", \\\"Architecture\\\": \\\"amd64\\\"}, \\\"BaseDockerfile\\\": null, \\\"BaseImageRegistry\\\": {\\\"Address\\\": \\\"viennaprivate.azurecr.io\\\", \\\"Username\\\": null, \\\"Password\\\": null}, \\\"Enabled\\\": false, \\\"Arguments\\\": []}, \\\"Spark\\\": {\\\"Repositories\\\": [], \\\"Packages\\\": [], \\\"PrecachePackages\\\": false}, \\\"InferencingStackVersion\\\": null}, \\\"History\\\": {\\\"OutputCollection\\\": true, \\\"DirectoriesToWatch\\\": [\\\"logs\\\"], \\\"EnableMLflowTracking\\\": true, \\\"snapshotProject\\\": true}, \\\"Spark\\\": {\\\"Configuration\\\": {\\\"spark.app.name\\\": \\\"Azure ML Experiment\\\", \\\"spark.yarn.maxAppAttempts\\\": \\\"1\\\"}}, \\\"ParallelTask\\\": {\\\"MaxRetriesPerWorker\\\": 0, \\\"WorkerCountPerNode\\\": 1, \\\"TerminalExitCodes\\\": null, \\\"Configuration\\\": {}}, \\\"BatchAi\\\": {\\\"NodeCount\\\": 0}, \\\"AmlCompute\\\": {\\\"Name\\\": null, \\\"VmSize\\\": null, \\\"RetainCluster\\\": false, \\\"ClusterMaxNodeCount\\\": 1}, \\\"AISuperComputer\\\": {\\\"InstanceType\\\": \\\"D2\\\", \\\"FrameworkImage\\\": null, \\\"ImageVersion\\\": null, \\\"Location\\\": null, \\\"AISuperComputerStorageData\\\": null, \\\"Interactive\\\": false, \\\"ScalePolicy\\\": null, \\\"VirtualClusterArmId\\\": null, \\\"TensorboardLogDirectory\\\": null, \\\"SSHPublicKey\\\": null, \\\"SSHPublicKeys\\\": null, \\\"EnableAzmlInt\\\": true, \\\"Priority\\\": \\\"Medium\\\", \\\"SLATier\\\": \\\"Standard\\\", \\\"UserAlias\\\": null}, \\\"KubernetesCompute\\\": {\\\"InstanceType\\\": null}, \\\"Tensorflow\\\": {\\\"WorkerCount\\\": 1, \\\"ParameterServerCount\\\": 1}, \\\"Mpi\\\": {\\\"ProcessCountPerNode\\\": 1}, \\\"PyTorch\\\": {\\\"CommunicationBackend\\\": \\\"nccl\\\", \\\"ProcessCount\\\": null}, \\\"Hdi\\\": {\\\"YarnDeployMode\\\": 2}, \\\"ContainerInstance\\\": {\\\"Region\\\": null, \\\"CpuCores\\\": 2.0, \\\"MemoryGb\\\": 3.5}, \\\"ExposedPorts\\\": null, \\\"Docker\\\": {\\\"UseDocker\\\": true, \\\"SharedVolumes\\\": true, \\\"ShmSize\\\": null, \\\"Arguments\\\": []}, \\\"Cmk8sCompute\\\": {\\\"Configuration\\\": {}}, \\\"CommandReturnCodeConfig\\\": {\\\"ReturnCode\\\": 0, \\\"SuccessfulReturnCodes\\\": []}, \\\"EnvironmentVariables\\\": {}, \\\"ApplicationEndpoints\\\": {}, \\\"Parameters\\\": []}, \\\"SnapshotId\\\": \\\"d96cc1f3-79ab-4dc1-8f27-79216c4ba361\\\", \\\"Snapshots\\\": [], \\\"SourceCodeDataReference\\\": null, \\\"ParentRunId\\\": null, \\\"DataContainerId\\\": null, \\\"RunType\\\": null, \\\"DisplayName\\\": null, \\\"EnvironmentAssetId\\\": null, \\\"Properties\\\": {}, \\\"Tags\\\": {}, \\\"AggregatedArtifactPath\\\": null}, \\\"ParentRunId\\\": \\\"HD_388102b6-984e-421e-a4c3-5b56e5b92e66\\\"}\", \"_aml_system_resume_child_runs\": \"null\", \"_aml_system_all_jobs_generated\": \"true\", \"_aml_system_cancellation_requested\": \"false\", \"_aml_system_samples_generated_count\": \"50\", \"_aml_system_progress_metadata_evaluation_timestamp\": \"\\\"2023-08-27T18:04:27.207048\\\"\", \"_aml_system_progress_metadata_digest\": \"\\\"65cabfcc1a49963b99bd89b380596bc2356c2d7f55b3e6cf92a45700a6709a63\\\"\", \"_aml_system_progress_metadata_active_timestamp\": \"\\\"2023-08-27T18:04:27.207048\\\"\", \"_aml_system_optimizer_state_artifact\": \"null\", \"_aml_system_outdated_optimizer_state_artifacts\": \"\\\"[]\\\"\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_0\": \"{\\\"--C\\\": 5.007124634558373, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_1\": \"{\\\"--C\\\": 3.4572069958926734, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_2\": \"{\\\"--C\\\": 97.07554778963714, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_3\": \"{\\\"--C\\\": 30.330056271232372, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_4\": \"{\\\"--C\\\": 58.097452343671165, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_5\": \"{\\\"--C\\\": 64.86140968155861, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_6\": \"{\\\"--C\\\": 30.999342489725812, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_7\": \"{\\\"--C\\\": 39.921901048010014, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_8\": \"{\\\"--C\\\": 48.133578583567555, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_9\": \"{\\\"--C\\\": 32.4794178218408, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_10\": \"{\\\"--C\\\": 52.42792441463385, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_11\": \"{\\\"--C\\\": 79.00818163291662, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_12\": \"{\\\"--C\\\": 95.84047834223777, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_13\": \"{\\\"--C\\\": 85.84726305914724, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_14\": \"{\\\"--C\\\": 64.83477772011497, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_15\": \"{\\\"--C\\\": 98.7135045977324, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_16\": \"{\\\"--C\\\": 75.31374428044687, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_17\": \"{\\\"--C\\\": 50.10900284085237, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_18\": \"{\\\"--C\\\": 62.67922230874556, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_19\": \"{\\\"--C\\\": 13.235534942303962, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_20\": \"{\\\"--C\\\": 35.62023451879149, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_21\": \"{\\\"--C\\\": 48.87344350083626, \\\"--max_iter\\\": 500}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_22\": \"{\\\"--C\\\": 21.527711727209702, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_23\": \"{\\\"--C\\\": 17.118897774962278, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_24\": \"{\\\"--C\\\": 27.955466914643484, \\\"--max_iter\\\": 500}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_25\": \"{\\\"--C\\\": 5.9543378680106285, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_26\": \"{\\\"--C\\\": 49.55486813302606, \\\"--max_iter\\\": 500}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\": \"{\\\"--C\\\": 31.106091660642416, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_28\": \"{\\\"--C\\\": 42.46702777007419, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_29\": \"{\\\"--C\\\": 17.78402322496148, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_30\": \"{\\\"--C\\\": 4.176054488809962, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_31\": \"{\\\"--C\\\": 73.26094489307806, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_32\": \"{\\\"--C\\\": 84.07990226092308, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_33\": \"{\\\"--C\\\": 82.1460107575095, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_34\": \"{\\\"--C\\\": 37.45464229895863, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_35\": \"{\\\"--C\\\": 57.74097322421584, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_36\": \"{\\\"--C\\\": 97.03685667996571, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_37\": \"{\\\"--C\\\": 18.7803259641488, \\\"--max_iter\\\": 100}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_38\": \"{\\\"--C\\\": 12.005641226509008, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_39\": \"{\\\"--C\\\": 25.201753459940356, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_40\": \"{\\\"--C\\\": 56.11291222053383, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_41\": \"{\\\"--C\\\": 25.385666869183407, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_42\": \"{\\\"--C\\\": 20.88504377832162, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_43\": \"{\\\"--C\\\": 41.122759784310844, \\\"--max_iter\\\": 800}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_44\": \"{\\\"--C\\\": 75.85276676310866, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_45\": \"{\\\"--C\\\": 72.03496085629718, \\\"--max_iter\\\": 500}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_46\": \"{\\\"--C\\\": 94.0747305627234, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_47\": \"{\\\"--C\\\": 32.05854806584085, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_48\": \"{\\\"--C\\\": 41.612142538419675, \\\"--max_iter\\\": 400}\", \"_aml_system_HD_388102b6-984e-421e-a4c3-5b56e5b92e66_49\": \"{\\\"--C\\\": 75.58615083343905, \\\"--max_iter\\\": 100}\"}, \"script_name\": null, \"arguments\": null, \"end_time_utc\": \"2023-08-27T18:24:05.94449Z\", \"status\": \"Completed\", \"log_files\": {\"azureml-logs/hyperdrive.txt\": \"https://mlstrg240741.blob.core.windows.net/azureml/ExperimentRun/dcid.HD_388102b6-984e-421e-a4c3-5b56e5b92e66/azureml-logs/hyperdrive.txt?sv=2019-07-07&sr=b&sig=FP5d%2BuexhnCaSDYmg7RnPMFC9MvKadKM7VA3k8HbOYI%3D&skoid=77e662a4-d667-4ba7-bae5-23511993c2c9&sktid=660b3398-b80e-49d2-bc5b-ac1dc93b5254&skt=2023-08-27T17%3A55%3A48Z&ske=2023-08-29T02%3A05%3A48Z&sks=b&skv=2019-07-07&st=2023-08-27T19%3A55%3A54Z&se=2023-08-28T04%3A05%3A54Z&sp=r\"}, \"log_groups\": [[\"azureml-logs/hyperdrive.txt\"]], \"run_duration\": \"0:20:08\", \"run_number\": \"1693159437\", \"run_queued_details\": {\"status\": \"Completed\", \"details\": null}, \"hyper_parameters\": {\"--C\": [\"uniform\", [0.1, 100]], \"--max_iter\": [\"choice\", [[100, 400, 500, 800]]]}}, \"child_runs\": [{\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_2\", \"run_number\": 1693159439, \"metric\": 0.91126487, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:09:31.178689Z\", \"end_time\": \"2023-08-27T18:10:41.740569Z\", \"created_time\": \"2023-08-27T18:03:59.918359Z\", \"created_time_dt\": \"2023-08-27T18:03:59.918359Z\", \"duration\": \"0:06:41\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 97.07554778963714, \"param_--max_iter\": 100, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_4\", \"run_number\": 1693159890, \"metric\": 0.91041515, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:11:44.729014Z\", \"end_time\": \"2023-08-27T18:12:08.811559Z\", \"created_time\": \"2023-08-27T18:11:30.452973Z\", \"created_time_dt\": \"2023-08-27T18:11:30.452973Z\", \"duration\": \"0:00:38\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 58.097452343671165, \"param_--max_iter\": 100, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_8\", \"run_number\": 1693159979, \"metric\": 0.90677349, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:13:08.004375Z\", \"end_time\": \"2023-08-27T18:13:30.665667Z\", \"created_time\": \"2023-08-27T18:12:59.975044Z\", \"created_time_dt\": \"2023-08-27T18:12:59.975044Z\", \"duration\": \"0:00:30\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 48.133578583567555, \"param_--max_iter\": 800, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_9\", \"run_number\": 1693159980, \"metric\": 0.9088371, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:13:07.983871Z\", \"end_time\": \"2023-08-27T18:13:30.896571Z\", \"created_time\": \"2023-08-27T18:13:00.072763Z\", \"created_time_dt\": \"2023-08-27T18:13:00.072763Z\", \"duration\": \"0:00:30\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 32.4794178218408, \"param_--max_iter\": 100, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_13\", \"run_number\": 1693160040, \"metric\": 0.90519544, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:14:11.586663Z\", \"end_time\": \"2023-08-27T18:14:34.975793Z\", \"created_time\": \"2023-08-27T18:14:00.963807Z\", \"created_time_dt\": \"2023-08-27T18:14:00.963807Z\", \"duration\": \"0:00:34\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 85.84726305914724, \"param_--max_iter\": 800, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_14\", \"run_number\": 1693160041, \"metric\": 0.91041515, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:14:11.665774Z\", \"end_time\": \"2023-08-27T18:14:35.145201Z\", \"created_time\": \"2023-08-27T18:14:01.097979Z\", \"created_time_dt\": \"2023-08-27T18:14:01.097979Z\", \"duration\": \"0:00:34\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 64.83477772011497, \"param_--max_iter\": 400, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_15\", \"run_number\": 1693160070, \"metric\": 0.90859432, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:14:37.736219Z\", \"end_time\": \"2023-08-27T18:15:01.884385Z\", \"created_time\": \"2023-08-27T18:14:30.822623Z\", \"created_time_dt\": \"2023-08-27T18:14:30.822623Z\", \"duration\": \"0:00:31\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 98.7135045977324, \"param_--max_iter\": 400, \"best_metric\": 0.91126487}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_17\", \"run_number\": 1693160100, \"metric\": 0.91466375, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:15:07.899561Z\", \"end_time\": \"2023-08-27T18:15:31.662801Z\", \"created_time\": \"2023-08-27T18:15:00.973638Z\", \"created_time_dt\": \"2023-08-27T18:15:00.973638Z\", \"duration\": \"0:00:30\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 50.10900284085237, \"param_--max_iter\": 800, \"best_metric\": 0.91466375}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_18\", \"run_number\": 1693160101, \"metric\": 0.91514931, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:15:09.258201Z\", \"end_time\": \"2023-08-27T18:15:32.77069Z\", \"created_time\": \"2023-08-27T18:15:01.197378Z\", \"created_time_dt\": \"2023-08-27T18:15:01.197378Z\", \"duration\": \"0:00:31\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 62.67922230874556, \"param_--max_iter\": 800, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_19\", \"run_number\": 1693160130, \"metric\": 0.90701627, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:15:41.043446Z\", \"end_time\": \"2023-08-27T18:16:06.003249Z\", \"created_time\": \"2023-08-27T18:15:30.868744Z\", \"created_time_dt\": \"2023-08-27T18:15:30.868744Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 13.235534942303962, \"param_--max_iter\": 400, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_20\", \"run_number\": 1693160161, \"metric\": 0.90750182, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:16:14.055511Z\", \"end_time\": \"2023-08-27T18:16:38.179709Z\", \"created_time\": \"2023-08-27T18:16:01.014938Z\", \"created_time_dt\": \"2023-08-27T18:16:01.014938Z\", \"duration\": \"0:00:37\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 35.62023451879149, \"param_--max_iter\": 400, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_23\", \"run_number\": 1693160190, \"metric\": 0.90980821, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:16:41.164664Z\", \"end_time\": \"2023-08-27T18:17:06.027003Z\", \"created_time\": \"2023-08-27T18:16:30.747894Z\", \"created_time_dt\": \"2023-08-27T18:16:30.747894Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 17.118897774962278, \"param_--max_iter\": 800, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_24\", \"run_number\": 1693160221, \"metric\": 0.91138626, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:17:10.249532Z\", \"end_time\": \"2023-08-27T18:17:33.571116Z\", \"created_time\": \"2023-08-27T18:17:01.075179Z\", \"created_time_dt\": \"2023-08-27T18:17:01.075179Z\", \"duration\": \"0:00:32\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 27.955466914643484, \"param_--max_iter\": 500, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_26\", \"run_number\": 1693160250, \"metric\": 0.91017237, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:17:41.511233Z\", \"end_time\": \"2023-08-27T18:18:04.401338Z\", \"created_time\": \"2023-08-27T18:17:30.831036Z\", \"created_time_dt\": \"2023-08-27T18:17:30.831036Z\", \"duration\": \"0:00:33\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 49.55486813302606, \"param_--max_iter\": 500, \"best_metric\": 0.91514931}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\", \"run_number\": 1693160251, \"metric\": 0.91660597, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:17:42.547326Z\", \"end_time\": \"2023-08-27T18:18:07.43047Z\", \"created_time\": \"2023-08-27T18:17:31.013066Z\", \"created_time_dt\": \"2023-08-27T18:17:31.013066Z\", \"duration\": \"0:00:36\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 31.106091660642416, \"param_--max_iter\": 100, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_29\", \"run_number\": 1693160281, \"metric\": 0.91490653, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:18:12.654513Z\", \"end_time\": \"2023-08-27T18:18:36.420647Z\", \"created_time\": \"2023-08-27T18:18:01.207058Z\", \"created_time_dt\": \"2023-08-27T18:18:01.207058Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 17.78402322496148, \"param_--max_iter\": 100, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_30\", \"run_number\": 1693160310, \"metric\": 0.91235737, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:18:40.568284Z\", \"end_time\": \"2023-08-27T18:19:07.518537Z\", \"created_time\": \"2023-08-27T18:18:30.75544Z\", \"created_time_dt\": \"2023-08-27T18:18:30.75544Z\", \"duration\": \"0:00:36\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 4.176054488809962, \"param_--max_iter\": 100, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_33\", \"run_number\": 1693160340, \"metric\": 0.90507405, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:19:11.695925Z\", \"end_time\": \"2023-08-27T18:19:34.684035Z\", \"created_time\": \"2023-08-27T18:19:00.978845Z\", \"created_time_dt\": \"2023-08-27T18:19:00.978845Z\", \"duration\": \"0:00:33\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 82.1460107575095, \"param_--max_iter\": 800, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_32\", \"run_number\": 1693160341, \"metric\": 0.90798738, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:19:11.900824Z\", \"end_time\": \"2023-08-27T18:19:35.200435Z\", \"created_time\": \"2023-08-27T18:19:01.043653Z\", \"created_time_dt\": \"2023-08-27T18:19:01.043653Z\", \"duration\": \"0:00:34\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 84.07990226092308, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_34\", \"run_number\": 1693160370, \"metric\": 0.90616655, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:19:42.021492Z\", \"end_time\": \"2023-08-27T18:20:05.47736Z\", \"created_time\": \"2023-08-27T18:19:30.88788Z\", \"created_time_dt\": \"2023-08-27T18:19:30.88788Z\", \"duration\": \"0:00:34\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 37.45464229895863, \"param_--max_iter\": 800, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_36\", \"run_number\": 1693160400, \"metric\": 0.91235737, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:20:09.222753Z\", \"end_time\": \"2023-08-27T18:20:33.402771Z\", \"created_time\": \"2023-08-27T18:20:00.852857Z\", \"created_time_dt\": \"2023-08-27T18:20:00.852857Z\", \"duration\": \"0:00:32\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 97.03685667996571, \"param_--max_iter\": 100, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_37\", \"run_number\": 1693160401, \"metric\": 0.91260015, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:20:08.691089Z\", \"end_time\": \"2023-08-27T18:20:31.457185Z\", \"created_time\": \"2023-08-27T18:20:01.029539Z\", \"created_time_dt\": \"2023-08-27T18:20:01.029539Z\", \"duration\": \"0:00:30\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 18.7803259641488, \"param_--max_iter\": 100, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_38\", \"run_number\": 1693160430, \"metric\": 0.90604516, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:20:43.302211Z\", \"end_time\": \"2023-08-27T18:21:07.561733Z\", \"created_time\": \"2023-08-27T18:20:30.932398Z\", \"created_time_dt\": \"2023-08-27T18:20:30.932398Z\", \"duration\": \"0:00:36\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 12.005641226509008, \"param_--max_iter\": 800, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_39\", \"run_number\": 1693160431, \"metric\": 0.90968682, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:20:43.322261Z\", \"end_time\": \"2023-08-27T18:21:07.025104Z\", \"created_time\": \"2023-08-27T18:20:31.066579Z\", \"created_time_dt\": \"2023-08-27T18:20:31.066579Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 25.201753459940356, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_40\", \"run_number\": 1693160460, \"metric\": 0.90956543, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:21:14.284621Z\", \"end_time\": \"2023-08-27T18:21:37.57071Z\", \"created_time\": \"2023-08-27T18:21:00.837514Z\", \"created_time_dt\": \"2023-08-27T18:21:00.837514Z\", \"duration\": \"0:00:36\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 56.11291222053383, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_43\", \"run_number\": 1693160490, \"metric\": 0.90980821, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:21:39.490118Z\", \"end_time\": \"2023-08-27T18:22:03.015301Z\", \"created_time\": \"2023-08-27T18:21:30.89518Z\", \"created_time_dt\": \"2023-08-27T18:21:30.89518Z\", \"duration\": \"0:00:32\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 41.122759784310844, \"param_--max_iter\": 800, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_44\", \"run_number\": 1693160520, \"metric\": 0.91235737, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:22:12.889616Z\", \"end_time\": \"2023-08-27T18:22:36.360287Z\", \"created_time\": \"2023-08-27T18:22:00.958517Z\", \"created_time_dt\": \"2023-08-27T18:22:00.958517Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 75.85276676310866, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_45\", \"run_number\": 1693160521, \"metric\": 0.91102209, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:22:12.666476Z\", \"end_time\": \"2023-08-27T18:22:36.827242Z\", \"created_time\": \"2023-08-27T18:22:01.12751Z\", \"created_time_dt\": \"2023-08-27T18:22:01.12751Z\", \"duration\": \"0:00:35\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 72.03496085629718, \"param_--max_iter\": 500, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_47\", \"run_number\": 1693160551, \"metric\": 0.91514931, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:22:45.622606Z\", \"end_time\": \"2023-08-27T18:23:10.223433Z\", \"created_time\": \"2023-08-27T18:22:31.128375Z\", \"created_time_dt\": \"2023-08-27T18:22:31.128375Z\", \"duration\": \"0:00:39\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 32.05854806584085, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}, {\"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_48\", \"run_number\": 1693160581, \"metric\": 0.90859432, \"status\": \"Completed\", \"run_type\": \"azureml.scriptrun\", \"training_percent\": null, \"start_time\": \"2023-08-27T18:23:12.593396Z\", \"end_time\": \"2023-08-27T18:23:36.161379Z\", \"created_time\": \"2023-08-27T18:23:01.551892Z\", \"created_time_dt\": \"2023-08-27T18:23:01.551892Z\", \"duration\": \"0:00:34\", \"hyperdrive_id\": \"388102b6-984e-421e-a4c3-5b56e5b92e66\", \"arguments\": null, \"param_--C\": 41.612142538419675, \"param_--max_iter\": 400, \"best_metric\": 0.91660597}], \"children_metrics\": {\"categories\": [0], \"series\": {\"Regularization Strength:\": [{\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"markers\", \"name\": \"Regularization Strength:\", \"stepped\": false, \"type\": \"scatter\", \"data\": [97.07554778963714, 58.097452343671165, 48.133578583567555, 32.4794178218408, 85.84726305914724, 64.83477772011497, 98.7135045977324, 50.10900284085237, 62.67922230874556, 13.235534942303962, 35.62023451879149, 17.118897774962278, 27.955466914643484, 49.55486813302606, 31.106091660642416, 17.78402322496148, 4.176054488809962, 82.1460107575095, 84.07990226092308, 37.45464229895863, 97.03685667996571, 18.7803259641488, 12.005641226509008, 25.201753459940356, 56.11291222053383, 41.122759784310844, 75.85276676310866, 72.03496085629718, 32.05854806584085, 41.612142538419675]}, {\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"lines\", \"name\": \"Regularization Strength:_max\", \"stepped\": true, \"type\": \"scatter\", \"data\": [97.07554778963714, 97.07554778963714, 97.07554778963714, 97.07554778963714, 97.07554778963714, 97.07554778963714, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324, 98.7135045977324]}], \"Max iterations:\": [{\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"markers\", \"name\": \"Max iterations:\", \"stepped\": false, \"type\": \"scatter\", \"data\": [100, 100, 800, 100, 800, 400, 400, 800, 800, 400, 400, 800, 500, 500, 100, 100, 100, 800, 400, 800, 100, 100, 800, 400, 400, 800, 400, 500, 400, 400]}, {\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"lines\", \"name\": \"Max iterations:_max\", \"stepped\": true, \"type\": \"scatter\", \"data\": [100, 100, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800, 800]}], \"Accuracy\": [{\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"markers\", \"name\": \"Accuracy\", \"stepped\": false, \"type\": \"scatter\", \"data\": [0.9112648701141054, 0.9104151493080845, 0.9067734887108522, 0.9088370963826171, 0.9051954357853847, 0.9104151493080845, 0.9085943190094683, 0.9146637533381888, 0.9151493080844866, 0.907016266084001, 0.9075018208302986, 0.9098082058752124, 0.9113862588006798, 0.9101723719349356, 0.9166059723233795, 0.9149065307113377, 0.9123573682932751, 0.9050740470988103, 0.9079873755765963, 0.9061665452779801, 0.9123573682932751, 0.9126001456664239, 0.9060451565914057, 0.909686817188638, 0.9095654285020636, 0.9098082058752124, 0.9123573682932751, 0.9110220927409566, 0.9151493080844866, 0.9085943190094683]}, {\"categories\": [1693159439, 1693159890, 1693159979, 1693159980, 1693160040, 1693160041, 1693160070, 1693160100, 1693160101, 1693160130, 1693160161, 1693160190, 1693160221, 1693160250, 1693160251, 1693160281, 1693160310, 1693160340, 1693160341, 1693160370, 1693160400, 1693160401, 1693160430, 1693160431, 1693160460, 1693160490, 1693160520, 1693160521, 1693160551, 1693160581], \"mode\": \"lines\", \"name\": \"Accuracy_max\", \"stepped\": true, \"type\": \"scatter\", \"data\": [0.9112648701141054, 0.9112648701141054, 0.9112648701141054, 0.9112648701141054, 0.9112648701141054, 0.9112648701141054, 0.9112648701141054, 0.9146637533381888, 0.9151493080844866, 0.9151493080844866, 0.9151493080844866, 0.9151493080844866, 0.9151493080844866, 0.9151493080844866, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795, 0.9166059723233795]}]}, \"metricName\": null, \"primaryMetricName\": \"Accuracy\", \"showLegend\": false}, \"run_metrics\": [{\"name\": \"best_child_by_primary_metric\", \"run_id\": \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66\", \"categories\": [0], \"series\": [{\"data\": [{\"time_elapse\": [451, 724, 875, 1207], \"metric_value\": [0.9141781985918912, 0.9151493080844866, 0.9166059723233795, 0.9166059723233795], \"metric_name\": [\"Accuracy\", \"Accuracy\", \"Accuracy\", \"Accuracy\"], \"run_id\": [\"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_0\", \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_18\", \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\", \"HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\"], \"final\": [false, false, false, true]}]}]}], \"run_logs\": \"[2023-08-27T18:03:58.472092][GENERATOR][INFO]Trying to sample '4' jobs from the hyperparameter space\\n[2023-08-27T18:03:59.1113931Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_0' \\n[2023-08-27T18:03:59.2498147Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_1' \\n[2023-08-27T18:03:59.3950807Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_2' \\n[2023-08-27T18:03:59.4965867Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_3' \\n[2023-08-27T18:03:59.467934][GENERATOR][INFO]Successfully sampled '4' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:03:59.9625569Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_3' \\n[2023-08-27T18:03:59.8940858Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_0' \\n[2023-08-27T18:04:00.0291395Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_2' \\n[2023-08-27T18:04:00.0244087Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_1' \\n[2023-08-27T18:11:29.247721][GENERATOR][INFO]Trying to sample '4' jobs from the hyperparameter space\\n[2023-08-27T18:11:29.7281251Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_4' \\n[2023-08-27T18:11:29.8639331Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_5' \\n[2023-08-27T18:11:30.0215837Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_7' \\n[2023-08-27T18:11:29.973568][GENERATOR][INFO]Successfully sampled '4' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:11:29.9721337Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_6' \\n[2023-08-27T18:11:30.4200278Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_5' \\n[2023-08-27T18:11:30.5365519Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_6' \\n[2023-08-27T18:11:30.5253614Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_4' \\n[2023-08-27T18:11:30.9795754Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_7' \\n[2023-08-27T18:12:59.314882][GENERATOR][INFO]Trying to sample '4' jobs from the hyperparameter space\\n[2023-08-27T18:12:59.7113628Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_8' \\n[2023-08-27T18:12:59.8462559Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_9' \\n[2023-08-27T18:12:59.9681015Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_10' \\n[2023-08-27T18:13:00.0678871Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_8' \\n[2023-08-27T18:13:00.0997238Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_11' \\n[2023-08-27T18:13:00.046348][GENERATOR][INFO]Successfully sampled '4' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:13:00.1727553Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_9' \\n[2023-08-27T18:13:00.3488991Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_10' \\n[2023-08-27T18:13:00.3979965Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_11' \\n[2023-08-27T18:14:00.228502][GENERATOR][INFO]Trying to sample '3' jobs from the hyperparameter space\\n[2023-08-27T18:14:00.6113004Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_12' \\n[2023-08-27T18:14:00.7625215Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_13' \\n[2023-08-27T18:14:00.8632748Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_14' \\n[2023-08-27T18:14:00.817765][GENERATOR][INFO]Successfully sampled '3' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:14:00.8998224Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_12' \\n[2023-08-27T18:14:01.0647662Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_13' \\n[2023-08-27T18:14:01.1725026Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_14' \\n[2023-08-27T18:14:30.244159][GENERATOR][INFO]Trying to sample '1' jobs from the hyperparameter space\\n[2023-08-27T18:14:30.591876][GENERATOR][INFO]Successfully sampled '1' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:14:30.6516060Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_15' \\n[2023-08-27T18:14:30.9121869Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_15' \\n[2023-08-27T18:15:00.219048][GENERATOR][INFO]Trying to sample '3' jobs from the hyperparameter space\\n[2023-08-27T18:15:00.5938746Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_16' \\n[2023-08-27T18:15:00.7113470Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_17' \\n[2023-08-27T18:15:00.8321405Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_16' \\n[2023-08-27T18:15:00.801427][GENERATOR][INFO]Successfully sampled '3' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:15:00.9117553Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_18' \\n[2023-08-27T18:15:01.0545955Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_17' \\n[2023-08-27T18:15:01.2797019Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_18' \\n[2023-08-27T18:15:30.240390][GENERATOR][INFO]Trying to sample '1' jobs from the hyperparameter space\\n[2023-08-27T18:15:30.7018665Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_19' \\n[2023-08-27T18:15:30.654792][GENERATOR][INFO]Successfully sampled '1' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:15:30.9574776Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_19' \\n[2023-08-27T18:16:00.254797][GENERATOR][INFO]Trying to sample '3' jobs from the hyperparameter space\\n[2023-08-27T18:16:00.7848425Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_20' \\n[2023-08-27T18:16:00.9437242Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_21' \\n[2023-08-27T18:16:00.888412][GENERATOR][INFO]Successfully sampled '3' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:16:01.0528695Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_22' \\n[2023-08-27T18:16:01.1112755Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_20' \\n[2023-08-27T18:16:01.2121675Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_21' \\n[2023-08-27T18:16:01.3786501Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_22' \\n[2023-08-27T18:16:30.235303][GENERATOR][INFO]Trying to sample '1' jobs from the hyperparameter space\\n[2023-08-27T18:16:30.5861858Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_23' \\n[2023-08-27T18:16:30.530475][GENERATOR][INFO]Successfully sampled '1' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:16:30.8343301Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_23' \\n[2023-08-27T18:17:00.264195][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:17:00.7559836Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_24' \\n[2023-08-27T18:17:00.772945][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:17:00.9731487Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_25' \\n[2023-08-27T18:17:01.1531189Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_24' \\n[2023-08-27T18:17:01.2594305Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_25' \\n[2023-08-27T18:17:30.232239][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:17:30.6363291Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_26' \\n[2023-08-27T18:17:30.647828][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:17:30.8065127Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27' \\n[2023-08-27T18:17:30.9082327Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_26' \\n[2023-08-27T18:17:31.0927682Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27' \\n[2023-08-27T18:18:00.267165][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:18:00.8502858Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_28' \\n[2023-08-27T18:18:00.9805979Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_29' \\n[2023-08-27T18:18:00.920736][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:18:01.1011970Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_28' \\n[2023-08-27T18:18:01.2896624Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_29' \\n[2023-08-27T18:18:30.229768][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:18:30.5722595Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_30' \\n[2023-08-27T18:18:30.7029208Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_31' \\n[2023-08-27T18:18:30.606230][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:18:30.8646478Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_30' \\n[2023-08-27T18:18:30.9415779Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_31' \\n[2023-08-27T18:19:00.264016][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:19:00.7136066Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_32' \\n[2023-08-27T18:19:00.7976462Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_33' \\n[2023-08-27T18:19:00.768735][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:19:01.0630992Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_33' \\n[2023-08-27T18:19:01.1257871Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_32' \\n[2023-08-27T18:19:30.230213][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:19:30.7304629Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_34' \\n[2023-08-27T18:19:30.7317188Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_35' \\n[2023-08-27T18:19:30.645599][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:19:30.9595238Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_34' \\n[2023-08-27T18:19:31.0279643Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_35' \\n[2023-08-27T18:20:00.292096][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:20:00.7082619Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_36' \\n[2023-08-27T18:20:00.8169193Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_37' \\n[2023-08-27T18:20:00.767754][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:20:00.9580235Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_36' \\n[2023-08-27T18:20:01.1059958Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_37' \\n[2023-08-27T18:20:30.259533][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:20:30.7537476Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_38' \\n[2023-08-27T18:20:30.8637922Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_39' \\n[2023-08-27T18:20:30.810060][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:20:31.0141104Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_38' \\n[2023-08-27T18:20:31.1564893Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_39' \\n[2023-08-27T18:21:00.248080][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:21:00.6360475Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_40' \\n[2023-08-27T18:21:00.7653931Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_41' \\n[2023-08-27T18:21:00.697317][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:21:00.9234747Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_40' \\n[2023-08-27T18:21:01.0200782Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_41' \\n[2023-08-27T18:21:30.278238][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:21:30.6010156Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_42' \\n[2023-08-27T18:21:30.7278572Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_43' \\n[2023-08-27T18:21:30.671850][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:21:30.8460790Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_42' \\n[2023-08-27T18:21:30.9861520Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_43' \\n[2023-08-27T18:22:00.382425][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:22:00.7875312Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_44' \\n[2023-08-27T18:22:00.9188212Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_45' \\n[2023-08-27T18:22:00.867056][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:22:01.0427241Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_44' \\n[2023-08-27T18:22:01.2122402Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_45' \\n[2023-08-27T18:22:30.399003][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:22:30.8387232Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_46' \\n[2023-08-27T18:22:30.795238][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:22:30.9876566Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_47' \\n[2023-08-27T18:22:31.2157085Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_47' \\n[2023-08-27T18:22:31.2122953Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_46' \\n[2023-08-27T18:23:00.414683][GENERATOR][INFO]Trying to sample '2' jobs from the hyperparameter space\\n[2023-08-27T18:23:01.2972902Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_48' \\n[2023-08-27T18:23:01.4295213Z][SCHEDULER][INFO]Scheduling job, id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_49' \\n[2023-08-27T18:23:01.336899][GENERATOR][INFO]Successfully sampled '2' jobs, they will soon be submitted to the execution target.\\n[2023-08-27T18:23:01.6482325Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_48' \\n[2023-08-27T18:23:01.7023978Z][SCHEDULER][INFO]Successfully scheduled a job. Id='HD_388102b6-984e-421e-a4c3-5b56e5b92e66_49' \\n[2023-08-27T18:23:31.403791][GENERATOR][INFO]Max number of jobs '50' reached for experiment.\\n[2023-08-27T18:23:31.574545][GENERATOR][INFO]All jobs generated.\\n[2023-08-27T18:24:06.685206][CONTROLLER][INFO]Experiment was 'ExperimentStatus.RUNNING', is 'ExperimentStatus.FINISHED'.\\n\\nRun is completed.\", \"graph\": {}, \"widget_settings\": {\"childWidgetDisplay\": \"popup\", \"send_telemetry\": false, \"log_level\": \"INFO\", \"sdk_version\": \"1.51.0\"}, \"loading\": false}"
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "error",
+          "ename": "NameError",
+          "evalue": "name 'hyperdrive_run' is not defined",
+          "traceback": [
+            "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+            "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+            "Cell \u001b[0;32mIn[6], line 5\u001b[0m\n\u001b[1;32m      3\u001b[0m hdr \u001b[38;5;241m=\u001b[39m exp\u001b[38;5;241m.\u001b[39msubmit(config\u001b[38;5;241m=\u001b[39mhyperdrive_config)\n\u001b[1;32m      4\u001b[0m RunDetails(hdr)\u001b[38;5;241m.\u001b[39mshow()\n\u001b[0;32m----> 5\u001b[0m \u001b[43mhyperdrive_run\u001b[49m\u001b[38;5;241m.\u001b[39mwait_for_completion(show_output\u001b[38;5;241m=\u001b[39m\u001b[38;5;28;01mTrue\u001b[39;00m)\n",
+            "\u001b[0;31mNameError\u001b[0m: name 'hyperdrive_run' is not defined"
+          ]
+        }
+      ],
+      "execution_count": 6,
+      "metadata": {
+        "gather": {
+          "logged": 1693159547293
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "print(hdr)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Run(Experiment: udacity-project,\nId: HD_388102b6-984e-421e-a4c3-5b56e5b92e66,\nType: hyperdrive,\nStatus: Completed)\n"
+        }
+      ],
+      "execution_count": 14,
+      "metadata": {
+        "gather": {
+          "logged": 1693160716415
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import joblib\n",
+        "# Get your best run and save the model from that run.\n",
+        "\n",
+        "best_run = hdr.get_best_run_by_primary_metric()\n",
+        "print(\"id: \", best_run.id)\n",
+        "print(\"Metrics :\", best_run.get_metrics())\n",
+        "final_model = best_run.register_model(model_name='lr_best_model', model_path=\"./\")"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "id:  HD_388102b6-984e-421e-a4c3-5b56e5b92e66_27\nMetrics : {'Regularization Strength:': 31.106091660642416, 'Max iterations:': 100, 'Accuracy': 0.9166059723233795}\n"
+        }
+      ],
+      "execution_count": 15,
+      "metadata": {
+        "gather": {
+          "logged": 1693160726513
+        },
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "best_run.get_file_names()"
+      ],
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "execution_count": 20,
+          "data": {
+            "text/plain": "['outputs/automl_model.onnx',\n 'outputs/model.pkl',\n 'system_logs/cs_capability/cs-capability.log',\n 'system_logs/hosttools_capability/hosttools-capability.log',\n 'system_logs/lifecycler/execution-wrapper.log',\n 'system_logs/lifecycler/lifecycler.log',\n 'system_logs/metrics_capability/metrics-capability.log',\n 'system_logs/snapshot_capability/snapshot-capability.log',\n 'user_logs/std_log.txt']"
+          },
+          "metadata": {}
+        }
+      ],
+      "execution_count": 20,
+      "metadata": {
+        "jupyter": {
+          "source_hidden": false,
+          "outputs_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        },
+        "gather": {
+          "logged": 1693160944085
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "best_run.download_file(best_run.get_file_names()[1], output_file_path='./outputs/')"
+      ],
+      "outputs": [],
+      "execution_count": 21,
+      "metadata": {
+        "gather": {
+          "logged": 1693161026417
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import joblib\n",
+        "joblib.load('./outputs/model.pkl')"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "The sklearn.linear_model.logistic module is  deprecated in version 0.22 and will be removed in version 0.24. The corresponding classes / functions should instead be imported from sklearn.linear_model. Anything that cannot be imported from sklearn.linear_model is now part of the private API.\nTrying to unpickle estimator LogisticRegression from version 0.20.3 when using version 0.22.1. This might lead to breaking code or invalid results. Use at your own risk.\nFrom version 0.24, get_params will raise an AttributeError if a parameter cannot be retrieved as an instance attribute. Previously it would return None.\n"
+        },
+        {
+          "output_type": "execute_result",
+          "execution_count": 22,
+          "data": {
+            "text/plain": "LogisticRegression(C=31.106091660642416, class_weight=None, dual=False,\n                   fit_intercept=True, intercept_scaling=1, l1_ratio=None,\n                   max_iter=100, multi_class='warn', n_jobs=None, penalty='l2',\n                   random_state=None, solver='warn', tol=0.0001, verbose=0,\n                   warm_start=False)"
+          },
+          "metadata": {}
+        }
+      ],
+      "execution_count": 22,
+      "metadata": {
+        "jupyter": {
+          "source_hidden": false,
+          "outputs_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        },
+        "gather": {
+          "logged": 1693162568553
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azureml.data.dataset_factory import TabularDatasetFactory\n",
+        "\n",
+        "# Create TabularDataset using TabularDatasetFactory\n",
+        "# Data is available at: \n",
+        "url = \"https://automlsamplenotebookdata.blob.core.windows.net/automl-sample-notebook-data/bankmarketing_train.csv\"\n",
+        "\n",
+        "ds = TabularDatasetFactory.from_delimited_files(url)"
+      ],
+      "outputs": [],
+      "execution_count": 23,
+      "metadata": {
+        "gather": {
+          "logged": 1693162595051
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from train import clean_data\n",
+        "\n",
+        "# Use the clean_data function to clean your data.\n",
+        "x, y = clean_data(ds)"
+      ],
+      "outputs": [],
+      "execution_count": 24,
+      "metadata": {
+        "gather": {
+          "logged": 1693162596798
+        },
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from azureml.train.automl import AutoMLConfig\n",
+        "\n",
+        "# Set parameters for AutoMLConfig\n",
+        "# NOTE: DO NOT CHANGE THE experiment_timeout_minutes PARAMETER OR YOUR INSTANCE WILL TIME OUT.\n",
+        "# If you wish to run the experiment longer, you will need to run this notebook in your own\n",
+        "# Azure tenant, which will incur personal costs.\n",
+        "automl_config = AutoMLConfig(\n",
+        "    experiment_timeout_minutes=30,\n",
+        "    task=\"classification\",\n",
+        "    primary_metric=\"accuracy\",\n",
+        "    training_data=ds,\n",
+        "    label_column_name=y.name,\n",
+        "    n_cross_validations=5,\n",
+        "    enable_onnx_compatible_models=True\n",
+        ")"
+      ],
+      "outputs": [],
+      "execution_count": 25,
+      "metadata": {
+        "gather": {
+          "logged": 1693162678847
+        },
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Submit your automl run\n",
+        "exp2 = Experiment(ws, \"automl_exp\")\n",
+        "atomlrun = exp2.submit(config=automl_config, show_output=True)"
+      ],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "No run_configuration provided, running on local with default configuration\nRunning in the active local environment.\n"
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "text/html": "<table style=\"width:100%\"><tr><th>Experiment</th><th>Id</th><th>Type</th><th>Status</th><th>Details Page</th><th>Docs Page</th></tr><tr><td>automl_exp</td><td>AutoML_210e4550-c165-4c3f-b5df-fe83236989e8</td><td>automl</td><td>Preparing</td><td><a href=\"https://ml.azure.com/runs/AutoML_210e4550-c165-4c3f-b5df-fe83236989e8?wsid=/subscriptions/d4ad7261-832d-46b2-b093-22156001df5b/resourcegroups/aml-quickstarts-240741/workspaces/quick-starts-ws-240741&amp;tid=660b3398-b80e-49d2-bc5b-ac1dc93b5254\" target=\"_blank\" rel=\"noopener\">Link to Azure Machine Learning studio</a></td><td><a href=\"https://docs.microsoft.com/en-us/python/api/overview/azure/ml/intro?view=azure-ml-py\" target=\"_blank\" rel=\"noopener\">Link to Documentation</a></td></tr></table>"
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": "Current status: DatasetEvaluation. Gathering dataset statistics.\nCurrent status: FeaturesGeneration. Generating features for the dataset.\nCurrent status: DatasetFeaturization. Beginning to fit featurizers and featurize the dataset.\nCurrent status: DatasetFeaturizationCompleted. Completed fit featurizers and featurizing the dataset.\nCurrent status: DatasetBalancing. Performing class balancing sweeping\nCurrent status: DatasetCrossValidationSplit. Generating individually featurized CV splits.\n\n********************************************************************************************\nDATA GUARDRAILS: \n\nTYPE:         Class balancing detection\nSTATUS:       ALERTED\nDESCRIPTION:  To decrease model bias, please cancel the current run and fix balancing problem.\n              Learn more about imbalanced data: https://aka.ms/AutomatedMLImbalancedData\nDETAILS:      Imbalanced data can lead to a falsely perceived positive effect of a model's accuracy because the input data has bias towards one class.\n+------------------------------+--------------------------------+--------------------------------------+\n|Size of the smallest class    |Name/Label of the smallest class|Number of samples in the training data|\n+==============================+================================+======================================+\n|3692                          |yes                             |32950                                 |\n+------------------------------+--------------------------------+--------------------------------------+\n\n********************************************************************************************\n\nTYPE:         Missing feature values imputation\nSTATUS:       PASSED\nDESCRIPTION:  No feature missing values were detected in the training data.\n              Learn more about missing value imputation: https://aka.ms/AutomatedMLFeaturization\n\n********************************************************************************************\n\nTYPE:         High cardinality feature detection\nSTATUS:       PASSED\nDESCRIPTION:  Your inputs were analyzed, and no high cardinality features were detected.\n              Learn more about high cardinality feature handling: https://aka.ms/AutomatedMLFeaturization\n\n********************************************************************************************\nCurrent status: ModelSelection. Beginning model selection.\n\n********************************************************************************************\nITER: The iteration being evaluated.\nPIPELINE: A summary description of the pipeline being evaluated.\nDURATION: Time taken for the current iteration.\nMETRIC: The result of computing score on the fitted pipeline.\nBEST: The best observed score thus far.\n********************************************************************************************\n\n ITER   PIPELINE                                       DURATION            METRIC      BEST\n    0   MaxAbsScaler LightGBM                          0:00:40             0.9151    0.9151\n    1   MaxAbsScaler XGBoostClassifier                 0:01:00             0.9128    0.9151\n    2   MaxAbsScaler ExtremeRandomTrees                0:00:44             0.7301    0.9151\n    3   SparseNormalizer XGBoostClassifier             0:00:51             0.9149    0.9151\n    4   MaxAbsScaler LightGBM                          0:00:37             0.9139    0.9151\n    5   MaxAbsScaler LightGBM                          0:00:37             0.8885    0.9151\n    6   StandardScalerWrapper XGBoostClassifier        0:00:43             0.9106    0.9151\n    7   MaxAbsScaler LogisticRegression                0:00:45             0.9083    0.9151\n    8   StandardScalerWrapper ExtremeRandomTrees       0:00:37             0.8880    0.9151\n    9   StandardScalerWrapper XGBoostClassifier        0:00:41             0.9142    0.9151\n   10   SparseNormalizer LightGBM                      0:00:37             0.9054    0.9151\n   11   StandardScalerWrapper XGBoostClassifier        0:00:41             0.9128    0.9151\n   12   MaxAbsScaler LogisticRegression                0:00:42             0.9083    0.9151\n   13   MaxAbsScaler SGD                               0:00:39             0.8501    0.9151\n   14   StandardScalerWrapper XGBoostClassifier        0:00:49             0.9131    0.9151\n   15   SparseNormalizer RandomForest                  0:01:07             0.8136    0.9151\n   16   StandardScalerWrapper LogisticRegression       0:00:39             0.9087    0.9151\n   17   StandardScalerWrapper RandomForest             0:00:53             0.9010    0.9151\n   18   StandardScalerWrapper XGBoostClassifier        0:00:50             0.9142    0.9151\n   19   TruncatedSVDWrapper RandomForest               0:03:58             0.8204    0.9151\n   20   TruncatedSVDWrapper RandomForest               0:05:48             0.8306    0.9151\n   21   VotingEnsemble                                 0:00:51             0.9182    0.9182\nStopping criteria reached at iteration 22. Ending experiment.\n********************************************************************************************\nCurrent status: BestRunExplainModel. Best run model explanations started\nCurrent status: ModelExplanationDataSetSetup. Model explanations data setup completed\nCurrent status: PickSurrogateModel. Choosing LightGBM as the surrogate model for explanations\nCurrent status: EngineeredFeatureExplanations. Computation of engineered features started\nCurrent status: EngineeredFeatureExplanations. Computation of engineered features completed\nCurrent status: RawFeaturesExplanations. Computation of raw features started\nCurrent status: RawFeaturesExplanations. Computation of raw features completed\nCurrent status: BestRunExplainModel. Best run model explanations completed\n********************************************************************************************\n"
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": "2023/08/27 19:07:58 WARNING mlflow.sklearn: Model was missing function: predict. Not logging python_function flavor!\nINFO:interpret_community.common.explanation_utils:Using default datastore for uploads\n"
+        }
+      ],
+      "execution_count": 26,
+      "metadata": {
+        "jupyter": {
+          "outputs_hidden": false,
+          "source_hidden": false
+        },
+        "nteract": {
+          "transient": {
+            "deleting": false
+          }
+        },
+        "gather": {
+          "logged": 1693165198834
+        }
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Retrieve and save your best automl model.\n",
+        "from azureml.automl.runtime.onnx_convert import OnnxConverter\n",
+        "\n",
+        "best_automl_model, onnx_model = atomlrun.get_output(return_onnx_model=True)\n",
+        "OnnxConverter.save_onnx_model(onnx_model, file_path=\"./automl_model.onnx\")    "
+      ],
+      "outputs": [],
+      "execution_count": 58,
+      "metadata": {}
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "outputs": [],
+      "execution_count": null,
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "kernel_info": {
+      "name": "python38-azureml"
+    },
+    "kernelspec": {
+      "name": "python38-azureml",
+      "language": "python",
+      "display_name": "Python 3.8 - AzureML"
+    },
+    "language_info": {
+      "name": "python",
+      "version": "3.8.5",
+      "mimetype": "text/x-python",
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "pygments_lexer": "ipython3",
+      "nbconvert_exporter": "python",
+      "file_extension": ".py"
+    },
+    "nteract": {
+      "version": "nteract-front-end@1.0.0"
+    },
+    "microsoft": {
+      "ms_spell_check": {
+        "ms_spell_check_language": "en"
+      },
+      "host": {
+        "AzureML": {
+          "notebookHasBeenCompleted": true
+        }
+      }
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 2
+}
